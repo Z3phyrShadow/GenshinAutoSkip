@@ -4,6 +4,8 @@ import cv2
 import tkinter as tk
 import threading
 import keyboard
+import os
+import sys
 
 x1 = 240
 y1 = 17
@@ -66,7 +68,14 @@ def listen_for_hotkey():
 
 threading.Thread(target=listen_for_hotkey, daemon=True).start()
 
-image_path = "test.png"
+
+if getattr(sys, 'frozen', False):
+    base_path = sys._MEIPASS
+else: 
+    base_path = os.path.dirname(__file__)
+
+image_path = os.path.join(base_path, "test.png")
+
 
 while True:
     if is_image_on_screen(image_path, x1, y1, x2, y2):
