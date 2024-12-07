@@ -1,93 +1,109 @@
-import time
-import pyautogui
-import cv2
 import tkinter as tk
 import threading
 import keyboard
+import pyautogui
+import cv2
+import numpy as np
 import os
 import sys
+import time
 
-x1 = 240
-y1 = 17
-x2 = 345
-y2 = 77
-
+x1, y1, x2, y2 = 240, 17, 345, 77
 running = True
-
-def is_image_on_screen(image_path, x1, y1, x2, y2):
-    region = (x1, y1, x2 - x1, y2 - y1)
-    try:
-        location = pyautogui.locateOnScreen(image_path, region=region, confidence=0.8)
-        return location is not None
-    except Exception as e:
-        print(f"Error: {e}")
-        return False
-
-def show_overlay(is_running):
-    overlay = tk.Tk()
-    overlay.overrideredirect(True)
-    overlay.attributes("-topmost", True)
-    overlay.attributes("-transparentcolor", "black")
-    
-    screen_width = overlay.winfo_screenwidth()
-    overlay_width = 200
-    overlay_height = 50
-    x_position = (screen_width // 2) - (overlay_width // 2)
-    overlay.geometry(f"{overlay_width}x{overlay_height}+{x_position}+10")
-    overlay.config(bg="black")
-    
-    if is_running:
-        text = "Auto Skipping"
-        color = "green"
-    else:
-        text = "Not Auto Skipping"
-        color = "red"
-
-    label = tk.Label(
-        overlay,
-        text=text,
-        fg=color,
-        bg="black",
-        font=("Arial", 10, "bold"),
-    )
-    label.pack(expand=True, fill="both")
-
-    overlay.after(1000, overlay.destroy)
-    overlay.mainloop()
-
-def toggle_app():
-    global running
-    if running:
-        print("App Disabled")
-    else:
-        print("App Enabled")
-    running = not running 
-
-def listen_for_hotkey():
-    keyboard.add_hotkey('ctrl+shift+e', toggle_app)
-
-threading.Thread(target=listen_for_hotkey, daemon=True).start()
-
+found_location = None
 
 if getattr(sys, 'frozen', False):
     base_path = sys._MEIPASS
-else: 
+else:
     base_path = os.path.dirname(__file__)
 
 image_path = os.path.join(base_path, "test.png")
+template = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+w, h = template.shape[::-1]
 
+def find_image():
+    global found_location
+    while True:
+        if not running:
+            time.sleep(0.5)
+            continue
 
-while True:
-    if is_image_on_screen(image_path, x1, y1, x2, y2):
-        print("Image is visible on the screen.")
+        screenshot = pyautogui.screenshot(region=(x1, y1, x2 - x1, y2 - y1))
+        screenshot = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2GRAY)
 
-        if running:
+        result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv2.minMaxLoc(result)
+
+        if max_val > 0.8:
+            found_location = (max_loc[0] + x1, max_loc[1] + y1, w, h)
             pyautogui.press("f")
-            time.sleep(0.1)
-            pyautogui.press("f")
-        
-        threading.Thread(target=show_overlay, args=(running,), daemon=True).start()
-    else:
-        print("Image is not visible on the screen.")
-    
-    time.sleep(0.5)
+        else:
+            found_location = None
+
+        time.sleep(0.1)
+
+def toggle_app():
+    global running
+    running = not running
+    print("App Enabled" if running else "App Disabled")
+
+def quit_app():
+    os._exit(0)
+
+def update_text_overlay(status_label):
+    status_label.config(
+        text="Auto Skipping" if running else "Not Auto Skipping",
+        fg="green" if running else "red",
+    )
+
+def update_box_overlay(canvas):
+    canvas.delete("all")
+    if found_location and running:
+        x, y, w, h = found_location
+        canvas.create_rectangle(
+            x - x1, y - y1, x - x1 + w, y - y1 + h, outline="red", width=2
+        )
+
+def main():
+    global found_location
+
+    keyboard.add_hotkey("ctrl+shift+e", toggle_app)
+    keyboard.add_hotkey("ctrl+shift+q", quit_app)
+
+    screen_width = pyautogui.size().width
+
+    # Create text overlay
+    text_root = tk.Tk()
+    text_root.overrideredirect(True)
+    text_root.attributes("-topmost", True)
+    text_root.attributes("-transparentcolor", "black")
+    text_width = 300
+    text_root.geometry(f"{text_width}x50+{(screen_width - text_width) // 2}+10")
+    text_root.config(bg="black")
+    status_label = tk.Label(
+        text_root, text="Not Auto Skipping", fg="red", bg="black", font=("Arial", 12, "bold")
+    )
+    status_label.pack()
+
+    # Create box overlay
+    box_root = tk.Tk()
+    box_root.overrideredirect(True)
+    box_root.attributes("-topmost", True)
+    box_root.attributes("-transparentcolor", "black")
+    box_root.geometry(f"{x2 - x1}x{y2 - y1}+{x1}+{y1}")
+    box_root.config(bg="black")
+    canvas = tk.Canvas(box_root, bg="black", highlightthickness=0)
+    canvas.pack(fill="both", expand=True)
+
+    def periodic_update():
+        update_text_overlay(status_label)
+        update_box_overlay(canvas)
+        text_root.after(100, periodic_update)
+
+    threading.Thread(target=find_image, daemon=True).start()
+
+    periodic_update()
+    text_root.mainloop()
+
+if __name__ == "__main__":
+    main()
